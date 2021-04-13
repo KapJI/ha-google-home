@@ -418,7 +418,8 @@ class GlocaltokensApiClient:
                 device.name,
                 data,
             )
-            device.available = False
-            device.request_reboot = True
+            if device.available:
+                device.available = False
+                device.request_reboot = True
 
         return resp
