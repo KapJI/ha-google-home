@@ -152,6 +152,7 @@ class GlocaltokensApiClient:
         # Reboot device if it's timing out
         if device.request_reboot:
             device.request_reboot = False
+            _LOGGER.warning("Request reboot for %s device", device.name)
             self.hass.async_create_task(
                 self.reboot_google_device(device, REBOOT_TIMEOUT)
             )
