@@ -68,6 +68,7 @@ HEADER_CAST_LOCAL_AUTH: Final[str] = "cast-local-authorization-token"
 HEADER_CONTENT_TYPE: Final[str] = "content-type"
 
 TIMEOUT: Final[int] = 2  # Request Timeout in seconds
+REBOOT_TIMEOUT: Final[int] = 300
 
 # TIMESTRINGS
 TIME_STR_FORMAT: Final[str] = "%H:%M:%S"

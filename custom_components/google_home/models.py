@@ -38,6 +38,7 @@ class GoogleHomeDevice:
         self.ip_address = ip_address
         self.hardware = hardware
         self.available = True
+        self.request_reboot = False
         self._do_not_disturb = False
         self._timers: List[GoogleHomeTimer] = []
         self._alarms: List[GoogleHomeAlarm] = []

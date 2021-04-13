@@ -23,6 +23,7 @@ from .const import (
     JSON_NOTIFICATIONS_ENABLED,
     JSON_TIMER,
     PORT,
+    REBOOT_TIMEOUT,
     TIMEOUT,
 )
 from .exceptions import InvalidMasterToken
@@ -148,6 +149,12 @@ class GlocaltokensApiClient:
         """Collect data from different endpoints."""
         device = await self.update_alarms_and_timers(device)
         device = await self.update_do_not_disturb(device)
+        # Reboot device if it's timing out
+        if device.request_reboot:
+            device.request_reboot = False
+            self.hass.async_create_task(
+                self.reboot_google_device(device, REBOOT_TIMEOUT)
+            )
         return device
 
     async def update_alarms_and_timers(
@@ -223,7 +230,9 @@ class GlocaltokensApiClient:
                     response,
                 )
 
-    async def reboot_google_device(self, device: GoogleHomeDevice) -> None:
+    async def reboot_google_device(
+        self, device: GoogleHomeDevice, timeout: Optional[int] = None
+    ) -> None:
         """Reboots a Google Home device if it supports this."""
 
         # "now" means reboot and "fdr" means factory reset (Not implemented).
@@ -233,9 +242,12 @@ class GlocaltokensApiClient:
             "Trying to reboot Google Home device %s",
             device.name,
         )
-
         response = await self.request(
-            method="POST", endpoint=API_ENDPOINT_REBOOT, device=device, data=data
+            method="POST",
+            endpoint=API_ENDPOINT_REBOOT,
+            device=device,
+            data=data,
+            timeout=timeout,
         )
 
         if response is not None:
@@ -302,8 +314,12 @@ class GlocaltokensApiClient:
         device: GoogleHomeDevice,
         data: Optional[JsonDict] = None,
         polling: bool = False,
+        timeout: Optional[int] = None,
     ) -> Optional[JsonDict]:
         """Shared request method"""
+
+        if timeout is None:
+            timeout = TIMEOUT
 
         if device.ip_address is None:
             _LOGGER.warning("Device %s doesn't have an IP address!", device.name)
@@ -331,7 +347,7 @@ class GlocaltokensApiClient:
 
         try:
             async with self._session.request(
-                method, url, json=data, headers=headers, timeout=TIMEOUT
+                method, url, json=data, headers=headers, timeout=timeout
             ) as response:
                 if response.status == HTTP_OK:
                     try:
@@ -402,5 +418,6 @@ class GlocaltokensApiClient:
                 data,
             )
             device.available = False
+            device.request_reboot = True
 
         return resp
