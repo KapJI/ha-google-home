@@ -9,6 +9,7 @@ from aiohttp import ClientError, ClientSession
 from aiohttp.client_exceptions import ClientConnectorError, ContentTypeError
 from glocaltokens.client import Device, GLocalAuthenticationTokens
 from glocaltokens.utils.token import is_aas_et
+import requests
 from zeroconf import Zeroconf
 
 from homeassistant.const import HTTP_NOT_FOUND, HTTP_OK, HTTP_UNAUTHORIZED
@@ -158,7 +159,7 @@ class GlocaltokensApiClient:
         self, device: GoogleHomeDevice
     ) -> GoogleHomeDevice:
         """Fetches timers and alarms from google device"""
-        response = await self.request(
+        response = await self.request2(
             method="GET", endpoint=API_ENDPOINT_ALARMS, device=device, polling=True
         )
 
@@ -200,7 +201,7 @@ class GlocaltokensApiClient:
             data,
         )
 
-        response = await self.request(
+        response = await self.request2(
             method="POST", endpoint=API_ENDPOINT_ALARM_DELETE, device=device, data=data
         )
 
@@ -242,7 +243,7 @@ class GlocaltokensApiClient:
             device.name,
         )
 
-        response = await self.request(
+        response = await self.request2(
             method="POST", endpoint=API_ENDPOINT_REBOOT, device=device, data=data
         )
 
@@ -276,7 +277,7 @@ class GlocaltokensApiClient:
                 device.name,
             )
 
-        response = await self.request(
+        response = await self.request2(
             method="POST",
             endpoint=API_ENDPOINT_DO_NOT_DISTURB,
             device=device,
@@ -329,7 +330,7 @@ class GlocaltokensApiClient:
                 device.name,
             )
 
-        response = await self.request(
+        response = await self.request2(
             method="POST",
             endpoint=API_ENDPOINT_ALARM_VOLUME,
             device=device,
@@ -468,4 +469,106 @@ class GlocaltokensApiClient:
             )
             device.available = False
 
+        return resp
+
+    async def request2(
+        self,
+        method: Literal["GET", "POST"],
+        endpoint: str,
+        device: GoogleHomeDevice,
+        data: JsonDict | None = None,
+        polling: bool = False,
+    ) -> JsonDict | None:
+        """Shared request method"""
+        if device.ip_address is None:
+            _LOGGER.warning("Device %s doesn't have an IP address!", device.name)
+            return None
+
+        if device.auth_token is None:
+            _LOGGER.warning("Device %s doesn't have an auth token!", device.name)
+            return None
+
+        url = self.create_url(device.ip_address, PORT, endpoint)
+
+        headers: dict[str, str] = {
+            HEADER_CAST_LOCAL_AUTH: device.auth_token,
+            HEADER_CONTENT_TYPE: "application/json",
+        }
+
+        _LOGGER.debug(
+            "Requesting endpoint %s for Google Home device %s - %s",
+            endpoint,
+            device.name,
+            url,
+        )
+
+        resp = None
+        try:
+            response = requests.request(
+                method, url, json=data, headers=headers, timeout=TIMEOUT
+            )
+        except requests.exceptions.Timeout:
+            _LOGGER.debug(
+                "%s device timed out while performing a request to it - Raw data: %s",
+                device.name,
+                data,
+            )
+            device.available = False
+            return None
+        except requests.exceptions.RequestException as ex:
+            _LOGGER.error(
+                "Request from %s device error: %s",
+                device.name,
+                ex,
+            )
+            device.available = False
+            return None
+        if response.status_code == HTTP_OK:
+            try:
+                resp = await response.json()
+            except ContentTypeError:
+                _LOGGER.debug("Failed to parse JSON from %s. ", device.name)
+                resp = {}
+            device.available = True
+        elif response.status_code == HTTP_UNAUTHORIZED:
+            # If token is invalid - force reload homegraph providing new token
+            # and rerun the task.
+            if polling:
+                _LOGGER.debug(
+                    (
+                        "Failed to fetch data from %s due to invalid token. "
+                        "Will refresh the token and try again."
+                    ),
+                    device.name,
+                )
+            else:
+                _LOGGER.warning(
+                    "Failed to send the request to %s due to invalid token. "
+                    "Token will be refreshed, please try again later.",
+                    device.name,
+                )
+            # We need to retry the update task instead of just cleaning the list
+            self.google_devices = []
+            device.available = False
+        elif response.status_code == HTTP_NOT_FOUND:
+            _LOGGER.debug(
+                (
+                    "Failed to perform request to %s, API returned %d. "
+                    "The device(hardware='%s') is possibly not Google Home "
+                    "compatible and has no alarms/timers. "
+                    "Will retry later."
+                ),
+                device.name,
+                response.status_code,
+                device.hardware,
+            )
+            device.available = False
+        else:
+            _LOGGER.error(
+                "Failed to access %s, API returned" " %d: %s",
+                device.name,
+                response.status_code,
+                response,
+            )
+            device.available = False
         return resp
